@@ -1,5 +1,5 @@
-<h1 align="center"> CTDC </h1>
-<h3 align="center"> Comparative Code and Performance Analysis of Solvers for the Traveling Salesman Problem | Computational Tools for Data Science </h3>
+<h1 align="center"> Computational Tools for Data Science (CTDC) </h1>
+<h3 align="center"> Comparative Code and Performance Analysis of Solvers for the Traveling Salesman Problem </h3>
 
 <br>
 
