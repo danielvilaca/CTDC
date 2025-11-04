@@ -1,0 +1,75 @@
+/***********************************************************
+  SAT-style TSP run on SMT backend (Z3)
+  Reuses edge-matrix encoding from tsp_1.pi
+***********************************************************/
+
+%import cp.   % Picat's built-in and native solver native
+%import sat.  % default: Kissat solver
+import smt.  % default: Microsoft Z3 solver
+%import mip.  % default: Gurobi optimizer solver
+import data.  % Load matrix cost
+
+% Allow optional command-line arg to pick dataset size:
+%   no args or anything other than "10"/"medium" => data1() (6 cities)
+%   arg "10" or "medium" => data10() (10 cities)
+%   arg "21" or "problem2" => data21() (21 cities)
+main =>
+   run("small").
+
+main([Arg]) =>
+   run(Arg).
+
+run(Size) =>
+   if Size == "10" ; Size == "medium" then
+      M = data10()
+   elseif Size == "21" ; Size == "problem2" then
+      M = data21()
+   else
+      M = data1()
+   end,
+   tsp(M).
+
+tsp(M) =>
+    N = length(M),
+
+    % Edge decision variables NextArr[I,J] in {0,1}
+    NextArr = new_array(N,N),
+    NextArr :: 0..1,
+
+    % Forbid unusable arcs (diagonal or zero cost entries)
+    foreach (I in 1..N, J in 1..N)
+       if M[I,J] == 0 then NextArr[I,J] = 0 end
+    end,
+
+    % Degree constraints
+    foreach (I in 1..N)
+       sum([NextArr[I,J] : J in 1..N]) #= 1
+    end,
+    foreach (J in 1..N)
+       sum([NextArr[I,J] : I in 1..N]) #= 1
+    end,
+
+    % Subtour elimination via ordering implications
+    Order = new_array(N), Order :: 1..N, Order[1] = 1,
+    foreach (I in 1..N)
+       NextArr[I,1] #=> Order[I] #= N,
+       foreach (J in 2..N)
+          NextArr[I,J] #=> Order[J] #= Order[I] + 1
+       end
+    end,
+
+    % Cost linking and objective
+    CostArr = new_array(N),
+    foreach (I in 1..N)
+       CostArr[I] :: min([M[I,J] : J in 1..N, M[I,J] !== 0]) .. max([M[I,J] : J in 1..N, M[I,J] !== 0]),
+       foreach (J in 1..N)
+          NextArr[I,J] #=> CostArr[I] #= M[I,J]
+       end
+    end,
+    TotalCost #= sum([CostArr[I] : I in 1..N]),
+
+    solve($[min(TotalCost), report(println(cost=TotalCost))], NextArr),
+
+    foreach (I in 1..N, J in 1..N)
+       if NextArr[I,J] == 1 then printf("%w -> %w\n", I, J) end
+    end.

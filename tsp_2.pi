@@ -1,0 +1,45 @@
+/***********************************************************
+  Adapted from Constraint Solving and Planning with Picat, Springer
+***********************************************************/
+import cp.    % Picat's built-in and native solver native
+%import sat.  % default: Kissat solver
+%import smt.  % default: Microsoft Z3 solver
+%import mip.  % default: Gurobi optimizer solver
+import data.  % Load matrix cost
+
+% Allow optional command-line arg to pick dataset size:
+%   no args or anything other than "10"/"medium" => data1() (6 cities)
+%   arg "10" or "medium" => data10() (10 cities)
+main =>
+   run("small").
+
+main([Arg]) =>
+   run(Arg).
+
+run(Size) =>
+   if Size == "10" ; Size == "medium" then
+      M = data10()
+   elseif Size == "21" ; Size == "problem2" then
+       M = data21()
+   else
+      M = data1()
+   end,
+   tsp(M).
+
+tsp(M) =>
+    N = length(M),
+    NextArr = new_array(N),    % visit NextArr[I] after I
+    NextArr :: 1..N,
+    CostArr = new_array(N),
+    circuit(NextArr),
+    foreach (I in 1..N)
+       CostArr[I] #> 0,
+       element(NextArr[I],M[I],CostArr[I])
+    end,
+    TotalCost #= sum(CostArr),
+    solve($[min(TotalCost), report(println(cost=TotalCost))],
+          NextArr),
+    foreach (I in 1..N)
+       printf("%w -> %w\n",I,NextArr[I])
+    end.
+

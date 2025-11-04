@@ -1,0 +1,204 @@
+% TSPTW (TSP with Time Window) in Picat.
+%   Adapted from Picat model created by Hakan Kjellerstrand
+
+import util.
+import cp.
+% import sat.
+% import mip.
+
+main => go.
+
+go =>
+  problem2(DistanceMatrix,TimeWindows),
+  %DistanceMatrix = generate_random_distances(5,5),
+  %TimeWindows = generate_random_times(5,300),
+  nl,
+  member(Type,[min_distance,min_time]),
+  %Type = min_time,
+  Type = min_distance,
+  tsptw(DistanceMatrix,TimeWindows, Type,Cities, Costs,Path,CumTimes,WaitTimes,TravelDistance,TravelTime),
+
+  println(travelDistance=TravelDistance),
+  println(travelTime=TravelTime),
+  println(cities=Cities),
+  println(costs=Costs),
+  println(path=Path),
+  println(cumTimes=CumTimes),
+  println(waitTimes=WaitTimes),
+  % fail,
+  nl.
+
+tsptw(DistanceMatrix,TimeWindows,Type, Cities, Costs,Path,CumTimes,WaitTimes,TravelDistance,TravelTime) =>
+   Len = DistanceMatrix.length,
+   MaxTimeWindows = max([TimeWindows[I,2] : I in 1..Len]), % Highest time to visit city
+   MaxTimeWindowsDiff = max([TimeWindows[I,2]-TimeWindows[I,1] : I in 2..Len]), % Highest difference time to visit city
+
+   Dists = [DistanceMatrix[I,J] : I in 1..Len, J in 1..Len, DistanceMatrix[I,J] > 0],
+   MinDist = min(Dists), % Minimum distance between cities
+   MaxDist = max(Dists), % Maximum distance between cities
+
+   Cities = new_list(Len), % cities
+   Cities :: 1..Len,
+
+   Costs = new_list(Len),  % distances
+   Costs :: MinDist..MaxDist,
+
+   Path = new_list(Len), % cities sequence
+   Path :: 1..Len,
+
+   CumTimes = new_list(Len), % cumulative times
+   CumTimes :: 0..MaxTimeWindows,
+
+   WaitTimes = new_list(Len), % waiting times
+   WaitTimes :: 0..MaxTimeWindows,
+
+   TravelTime #= CumTimes[Len], % total travel time
+   % TravelTime #>= 0,
+
+   TravelDistance #= sum(Costs), % total distance path
+   % TravelDistance #>= 0,
+
+   % Traditional TSP
+   all_distinct(Cities), % implied constraint
+   circuit(Cities),
+
+   % connect cities and costs
+   foreach({Row,City,Cost} in zip(DistanceMatrix,Cities,Costs))
+     element(City,Row,Cost)
+   end,
+
+    % Cities sequence and depot anchoring
+    all_distinct(Path),
+   circuit_path(Cities,Path),
+   % Allow flexible start city (no fixed depot anchoring); set Path[1]=1 if depot-start is required
+   % Path[1] #= 1,
+
+    % Arrival times and monotonicity
+    ArrTimes = new_list(Len),
+    ArrTimes :: 0..MaxTimeWindows,
+    increasing(CumTimes),
+
+    % First city (depot at time 0 with possible wait)
+    ArrTimes[1] #= 0,
+    element(Path[1],WaitTimes,WT1),
+    matrix_element(TimeWindows,Path[1],1,LB1),
+    matrix_element(TimeWindows,Path[1],2,UB1),
+    WT1 #>= LB1 - ArrTimes[1], WT1 #>= 0,
+    CumTimes[1] #= ArrTimes[1] + WT1,
+    CumTimes[1] #=< UB1,
+
+    % Propagate to subsequent cities with wait semantics
+    foreach(I in 2..Len)
+       matrix_element(DistanceMatrix,Path[I-1],Path[I],Tij),
+       ArrTimes[I] #= CumTimes[I-1] + Tij,
+       element(Path[I],WaitTimes,WTI),
+       matrix_element(TimeWindows,Path[I],1,LBI),
+       matrix_element(TimeWindows,Path[I],2,UBI),
+       WTI #>= LBI - ArrTimes[I], WTI #>= 0,
+       CumTimes[I] #= ArrTimes[I] + WTI,
+       CumTimes[I] #=< UBI
+    end,
+
+   Vars = Path ++ Costs ++ Cities ++ CumTimes ++ WaitTimes ++ [TravelDistance,TravelTime],
+   println(solve),
+   if Type == min_distance then
+      println("\nMinimizing travel distance"),
+      solve($[degree,split,min(TravelDistance),report(println(travelDistance=TravelDistance))],Vars)
+   else
+      println("\nMinimizing travel time"),
+     solve($[degree,split,min(TravelTime),report(println(travelTime=TravelTime))],Vars)
+   end.
+
+% extract the path from the circuit
+circuit_path(X,Path) =>
+   N = length(X),
+   all_different(X),
+   all_different(Path),
+   X[1] #= Path[1],
+   foreach(I in 2..N) element(Path[I-1],X,Path[I]) end.
+
+problem1(DistanceMatrix,TimeWindows) =>
+DistanceMatrix =
+[[0,4,2],
+ [4,0,4],
+ [2,4,0]
+],
+TimeWindows =
+[[0,100],
+ [50,55],
+ [8,8]
+].
+
+
+problem2(DistanceMatrix,TimeWindows) =>
+DistanceMatrix =
+[
+%1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21
+[ 0,19,17,34, 7,20,10,17,28,15,23,29,23,29,21,20, 9,16,21,13,12], % 1
+[19, 0,10,41,26, 3,27,25,15,17,17,14,18,48,17, 6,21,14,17,13,31], % 2
+[17,10, 0,47,23,13,26,15,25,22,26,24,27,44, 7, 5,23,21,25,18,29], % 3
+[34,41,47, 0,36,39,25,51,36,24,27,38,25,44,54,45,25,28,26,28,27], % 4
+[ 7,26,23,36, 0,27,11,17,35,22,30,36,30,22,25,26,14,23,28,20,10], % 5
+[20, 3,13,39,27, 0,26,27,12,15,14,11,15,49,20, 9,20,11,14,11,30], % 6
+[10,27,26,25,11,26, 0,26,31,14,23,32,22,25,31,28, 6,17,21,15, 4], % 7
+[17,25,15,51,17,27,26, 0,39,31,38,38,38,34,13,20,26,31,36,28,27], % 8
+[28,15,25,36,35,12,31,39, 0,17, 9, 2,11,56,32,21,24,13,11,15,35], % 9
+[15,17,22,24,22,15,14,31,17, 0, 9,18, 8,39,29,21, 8, 4, 7, 4,18], % 10
+[23,17,26,27,30,14,23,38, 9, 9, 0,11, 2,48,33,23,17, 7, 2,10,27], % 11
+[29,14,24,38,36,11,32,38, 2,18,11, 0,13,57,31,20,25,14,13,17,36], % 12
+[23,18,27,25,30,15,22,38,11, 8, 2,13, 0,47,34,24,16, 7, 2,10,26], % 13
+[29,48,44,44,22,49,25,34,56,39,48,57,47, 0,46,48,31,42,46,40,21], % 14
+[21,17, 7,54,25,20,31,13,32,29,33,31,34,46, 0,11,29,28,32,25,33], % 15
+[20, 6, 5,45,26, 9,28,20,21,21,23,20,24,48,11, 0,23,19,22,17,32], % 16
+[ 9,21,23,25,14,20, 6,26,24, 8,17,25,16,31,29,23, 0,11,15, 9,10], % 17
+[16,14,21,28,23,11,17,31,13, 4, 7,14, 7,42,28,19,11, 0, 5, 3,21], % 18
+[21,17,25,26,28,14,21,36,11, 7, 2,13, 2,46,32,22,15, 5, 0, 8,25], % 19
+[13,13,18,28,20,11,15,28,15, 4,10,17,10,40,25,17, 9, 3, 8, 0,19], % 20
+[12,31,29,27,10,30, 4,27,35,18,27,36,26,21,33,32,10,21,25,19, 0]  % 21
+],
+TimeWindows =
+[
+[ 0,        408],  % 1
+[ 62,        68],  % 2
+[181,       205],  % 3
+[306,       324],  % 4
+[214,       217],  % 5
+[ 51,        61],  % 6
+[102,       129],  % 7
+[175,       186],  % 8
+[250,       263],  % 9
+[  3,        23],  % 10
+[ 21,        49],  % 11
+[ 79,        90],  % 12
+[ 78,        96],  % 13
+[140,       154],  % 14
+[354,       386],  % 15
+[ 42,        63],  % 16
+[  2,        13],  % 17
+[ 24,        42],  % 18
+[ 20,        33],  % 19
+[  9,        21],  % 20
+[275,       300]   % 21
+].
+
+
+% Simetric matrix
+generate_random_distances(N,MaxVal) = Matrix =>
+
+    Matrix1 = new_array(N, N),
+    foreach(I in 1..N)
+        foreach(J in I..N)
+            V = random(1, MaxVal),
+            Matrix1[I, J] := V,
+            Matrix1[J, I] := V
+        end,
+    end,
+    % Matrix1 = [ [1 + random() mod MaxVal : _ in 1..N] : _ in I..N],
+    % Matrix2 = [[ if (I <= J) then Matrix1.get((I,J)) else Matrix1.get((J,I)) end : J in 1..N ] : I in 1..N],
+    foreach(I in 1..N) Matrix1[I,I] := 0 end,
+    Matrix = array_matrix_to_list_matrix(Matrix1).
+
+% First line -> start/end point
+generate_random_times(N,MaxVal) = Matrix =>
+    Matrix = [[0,MaxVal]]++[[V1, V2] : _ in 2..N, V1 = random(0, MaxVal), V2 = random(V1, MaxVal)].
+

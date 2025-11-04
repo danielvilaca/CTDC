@@ -1,0 +1,77 @@
+/***********************************************************
+  Linear MIP TSP (MTZ) on Picat's mip backend (Gurobi)
+  Edge-matrix with MTZ subtour elimination and linear cost
+***********************************************************/
+
+%import cp.   % Picat's built-in and native solver native
+%import sat.  % default: Kissat solver
+%import smt.  % default: Microsoft Z3 solver
+import mip.  % default: Gurobi optimizer solver
+import data.  % Load matrix cost
+
+% Allow optional command-line arg to pick dataset size:
+%   no args or anything other than "10"/"medium" => data1() (6 cities)
+%   arg "10" or "medium" => data10() (10 cities)
+%   arg "21" or "problem2" => data21() (21 cities)
+main =>
+   run("small").
+
+main([Arg]) =>
+   run(Arg).
+
+run(Size) =>
+   if Size == "10" ; Size == "medium" then
+      M = data10()
+   elseif Size == "21" ; Size == "problem2" then
+      M = data21()
+   else
+      M = data1()
+   end,
+   tsp_mip(M).
+
+tsp_mip(M) =>
+    N = length(M),
+
+    % Decision variables: x[i,j] in {0,1}
+    X = new_array(N,N),
+    X :: 0..1,
+
+    % Forbid diagonal/unusable arcs
+    foreach (I in 1..N, J in 1..N)
+       if M[I,J] == 0 then X[I,J] = 0 end
+    end,
+
+    % Degree constraints
+    foreach (I in 1..N)
+       sum([X[I,J] : J in 1..N]) #= 1
+    end,
+    foreach (J in 1..N)
+        sum([X[I,J] : I in 1..N]) #= 1
+    end,
+
+    % MTZ subtour elimination
+    U = new_array(N),
+    U :: 1..N,
+    U[1] #= 1,
+    foreach (I in 2..N)
+       U[I] :: 2..N
+    end,
+    foreach (I in 2..N, J in 2..N, I != J)
+       % U[I] - U[J] + N*X[I,J] <= N-1
+       U[I] - U[J] + N*X[I,J] #=< N - 1
+    end,
+
+    % Linear cost linking: c[i] = sum_j X[i,j]*M[i,j]
+    C = new_array(N),
+    C :: 0..max(M),
+    foreach (I in 1..N)
+        C[I] #= sum([X[I,J]*M[I,J] : J in 1..N])
+    end,
+    TotalCost #= sum([C[I] : I in 1..N]),
+
+    Vars = [TotalCost] ++ U ++ C ++ [X[I,J] : I in 1..N, J in 1..N],
+    solve($[min(TotalCost), report(println(cost=TotalCost))], Vars),
+
+    foreach (I in 1..N, J in 1..N)
+        if X[I,J] == 1 then printf("%w -> %w\n", I, J) end
+    end.

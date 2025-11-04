@@ -1,0 +1,81 @@
+/***********************************************************
+  Adapted from Constraint Solving and Planning with Picat, Springer
+
+  SAT Model
+***********************************************************/
+
+%import cp.   % Picat's built-in and native solver native
+import sat.   % default: Kissat solver
+%import smt.  % default: Microsoft Z3 solver
+%import mip.  % default: Gurobi optimizer solver
+import data.  % Load matrix cost
+
+% Allow optional command-line arg to pick dataset size:
+%   no args or anything other than "10"/"medium" => data1() (6 cities)
+%   arg "10" or "medium" => data10() (10 cities)
+main =>
+   run("small").
+
+main([Arg]) =>
+   run(Arg).
+
+run(Size) =>
+   if Size == "10" ; Size == "medium" then
+      M = data10()
+   elseif Size == "21" ; Size == "problem2" then
+      M = data21()
+   else
+      M = data1()
+   end,
+   tsp(M).
+
+tsp(M) =>
+    N = length(M),
+
+    % Tour specification
+    % For two vertices I and J, if a tour includes the edge I->J then NextArr[I,J] is 1
+    NextArr = new_array(N,N),
+    NextArr :: 0..1,
+
+    % foreach loop ensures that the edge I->J is not in a tour if vertex J is not directly reachable from vertex I or if J == I.
+    foreach (I in 1..N, J in 1..N)
+       if M[I,J] == 0 then NextArr[I,J] = 0 end
+    end,
+
+    % each vertex is followed by exactly one vertex in a tour
+    foreach (I in 1..N)
+       sum([NextArr[I,J] : J in 1..N]) #= 1
+    end,
+
+    % each vertex is preceded by exactly one vertex in a tour
+    foreach (J in 1..N)
+       sum([NextArr[I,J] : I in 1..N]) #= 1
+    end,
+
+    % no sub-tours constraint
+    Order = new_array(N), % assigns a unique ordering number from 1..N to each vertex.
+                          % For each vertex I, OrderArr[I] indicates the ordering number assigned to vertex I.
+    Order :: 1..N,
+    Order[1] = 1,     % visit vertex 1 first
+    foreach (I in 1..N)
+       NextArr[I,1] #=> Order[I] #= N, % For each vertex I, if vertex 1 is visited after vertex I, then OrderArr[I] equals N
+       foreach (J in 2..N)
+          NextArr[I,J] #=> Order[J] #= Order[I]+1 % for each J in 2..N, if NextArr[I,J] == 1, then OrderArr[J] #= OrderArr[I]+1.
+       end
+    end,
+
+    CostArr = new_array(N), % CostArr[I] is the same as M[I,J], the cost of the edge I->J.
+    foreach (I in 1..N)
+       CostArr[I] :: min([M[I,J] : J in 1..N, M[I,J] !== 0]) ..  % CostArr domain
+                     max([M[I,J] : J in 1..N, M[I,J] !== 0]),
+       foreach (J in 1..N)
+          NextArr[I,J] #=> CostArr[I] #= M[I,J]
+       end
+    end,
+    TotalCost #= sum([CostArr[I] : I in 1..N]),
+    solve($[min(TotalCost),report(println(cost=TotalCost))],
+          NextArr),
+    foreach (I in 1..N, J in 1..N)
+       if NextArr[I,J]==1 then printf("%w -> %w\n",I,J) end
+    end.
+
